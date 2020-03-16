@@ -18,13 +18,6 @@ read in data
 data('prostate')
 ```
 
-correlation coeficients
-```{r}
-cor(prostate)
-
-cor(prostate, prostate$lpsa)
-```
-
 training and testing sets
 ```{r}
 ## split prostate into testing and training subsets
@@ -37,6 +30,13 @@ prostate_test <- prostate %>%
   filter(train == FALSE) %>% 
   select(-train)
 ```
+
+correlation coeficients
+```{r}
+cor(prostate_train[1:8])
+```
+
+
 
 linear model fitting lpsa outcome
 ```{r}
@@ -67,7 +67,7 @@ x_inp <- model.matrix(form, data=prostate_train)
 y_out <- prostate_train$lpsa
 
 #?glmnet()
-fit_ridge <- glmnet(x=x_inp, y=y_out, lambda= seq(0.5,0,-0.05), alpha = 0)
+fit_ridge <- glmnet(x=x_inp, y=y_out, lambda= seq(0.75,0,-0.05), alpha = 0)
 #print(fit_ridge$beta)
 ```
 
@@ -90,7 +90,7 @@ abline(h=0, lty=3, lwd=2)
 ## functions to compute testing/training error with glmnet
 error_ridge <- function(dat, fit, lam, form, loss=L2_loss) {
   x_inp <- model.matrix(form, data=dat)
-  y_out <- dat$lcavol
+  y_out <- dat$lpsa
   y_hat <- predict(fit, newx=x_inp, s=lam)  ## see predict.elnet
   mean(loss(y_out, y_hat))
 }
