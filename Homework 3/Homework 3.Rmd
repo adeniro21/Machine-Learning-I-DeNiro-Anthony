@@ -1,0 +1,233 @@
+---
+title: "Homework 2"
+author: Anthony DeNiro
+date: March 19, 2020
+output: github_document
+---
+
+```{r}
+library(MASS)
+library(manipulate) 
+library(glmnet)
+library(caret)
+```
+
+```{r}
+mcycle <- mcycle
+```
+
+## 1.
+```{r}
+trainInd <- sample(1:nrow(mcycle), floor(nrow(mcycle)) * 0.75, replace = F)
+mcycle_train <- mcycle[trainInd,]
+mcycle_test <- mcycle[-trainInd,]
+```
+
+## 2. 
+
+creating predictions using training data
+```{r}
+x <- matrix(mcycle_train$times, length(mcycle_train$times), 1)
+y <- mcycle_train$accel
+
+kernel_k_nearest_neighbors <- function(x, x0, k_)
+{
+  ## compute distance betwen each x and x0
+  z <- t(t(x) - x0)
+  d <- sqrt(rowSums(z*z))
+  
+  ## initialize kernel weights to zero
+  w <- rep(0, length(d))
+  
+  ## set weight to 1 for k nearest neighbors
+  w[order(d)[1:k_]] <- 1
+  
+  return(w)
+}
+
+## y  - n x 1 vector of training outputs
+## x  - n x p matrix of training inputs
+## x0 - m x p matrix where to make predictions
+## kern  - kernel function to use
+## ... - arguments to pass to kernel function
+nadaraya_watson <- function(y, x, x0, kern, ...) 
+{
+  k <- t(apply(x0, 1, function(x0_) 
+  {
+    k_ <- kern(x, x0_, ...)
+    k_/sum(k_)
+  }))
+  yhat <- drop(k %*% y)
+  attr(yhat, 'k') <- k
+  return(yhat)
+}
+
+#y_hat <- nadaraya_watson(y, x, x, kernel_k_nearest_neighbors, k_ = 5)
+#ength(y_hat)
+set.seed(320)
+
+k_seq <- seq(1,70,1)
+matrix_train_pred <- matrix(nrow = 70, ncol = nrow(mcycle_train))
+for(i in seq_along(k_seq))
+{
+  y_hat <- nadaraya_watson(y, x, x, kernel_k_nearest_neighbors, k_ = k_seq[i])
+  matrix_train_pred[i,] <- y_hat
+}
+
+
+```
+
+
+## 3.
+
+predictions for the validation data
+```{r}
+x2 <- matrix(mcycle_test$times, length(mcycle_test$times), 1)
+y2 <- mcycle_test$accel
+
+k_seq2 <- seq(1,34,1)
+matrix_test_pred <- matrix(nrow = 34, ncol = nrow(mcycle_test))
+for(i in seq_along(k_seq2))
+{
+  y_hat <- nadaraya_watson(y2, x2, x2, kernel_k_nearest_neighbors, k_ = k_seq2[i])
+  matrix_test_pred[i,] <- y_hat
+}
+
+
+```
+
+error plot
+```{r}
+loss_squared_error <- function(y, yhat)
+  (y - yhat)^2
+
+## test/train error
+## y    - train/test y
+## yhat - predictions at train/test x
+## loss - loss function
+error <- function(y, yhat, loss=loss_squared_error)
+  mean(loss(y, yhat))
+
+## Compute effective df using NW method
+## y  - n x 1 vector of training outputs
+## x  - n x p matrix of training inputs
+## kern  - kernel function to use
+## ... - arguments to pass to kernel function
+effective_df <- function(y, x, kern, ...) {
+  y_hat <- nadaraya_watson(y, x, x,
+                           kern=kern, ...)
+  sum(diag(attr(y_hat, 'k')))
+}
+
+## AIC
+## y    - training y
+## yhat - predictions at training x
+## d    - effective degrees of freedom
+aic <- function(y, yhat, d)
+  error(y, yhat) + 2/length(y)*d
+
+## BIC
+## y    - training y
+## yhat - predictions at training x
+## d    - effective degrees of freedom
+bic <- function(y, yhat, d)
+  error(y, yhat) + log(length(y))/length(y)*d
+
+## compute effective degrees of freedom
+edf_vec <- vector("numeric", 70)
+
+for(i in seq_along(k_seq))
+{
+  edf <- effective_df(y, x, kernel_k_nearest_neighbors, k_ = k_seq[i])
+  edf_vec[i] <- edf
+}
+
+
+
+train_error <- vector("numeric", 70)
+test_error <- vector("numeric", 34)
+aic_error <- vector("numeric", 70)
+bic_error <- vector("numeric", 70)
+
+for(i in 1:nrow(matrix_train_pred))
+{
+  train_error[i] <- error(y, matrix_train_pred[i,])
+  aic_error[i] <- aic(y, matrix_train_pred[i,], edf_vec[i])
+  bic_error[i] <- bic(y, matrix_train_pred[i,], edf_vec[i])
+}
+
+for(i in 1:nrow(matrix_test_pred))
+{
+  test_error[i] <- error(y2, matrix_test_pred[i,])
+}
+
+
+{plot(k_seq, train_error, type = "l", col = "red", xlim = c(0, 20), ylim = c(0, 1000))
+  lines(k_seq, aic_error, type = "l", col = "green")
+  lines(k_seq, bic_error, type = "l", col = "blue")
+  lines(k_seq2, test_error, type = "l", col = "black")
+}
+
+error_matrix <- as.data.frame(rbind(train_error, aic_error, bic_error))
+
+error_matrix
+```
+our training error, bic, and aic lines are hard to tell from each other, but they are different values, as shown in the dataframe
+
+
+## 4. 
+
+5 fold CV for KNN model
+```{r}
+## 5-fold cross-validation of knnreg model
+## create five folds
+set.seed(1985)
+inc_flds  <- createFolds(mcycle$accel, k=5)
+#print(inc_flds)
+sapply(inc_flds, length)  ## not all the same length
+
+cvknnreg <- function(kNN = 10, flds=inc_flds) {
+  cverr <- rep(NA, length(flds))
+  for(tst_idx in 1:length(flds)) 
+  { ## for each fold
+    
+        ## get training and testing data
+    inc_trn <- mcycle[-flds[[tst_idx]],]
+    inc_tst <- mcycle[ flds[[tst_idx]],]
+    
+    
+    ## fit kNN model to training data
+    knn_fit <- knnreg(accel ~ times,
+                      k=kNN, data= inc_trn)
+    
+    ## compute test error on testing data
+    pre_tst <- predict(knn_fit, inc_tst)
+    cverr[tst_idx] <- mean((inc_tst$accel - pre_tst)^2)
+  }
+  return(cverr)
+}
+
+## Compute 5-fold CV for kNN = 1:20
+cverrs <- sapply(1:70, cvknnreg)
+cverrs_mean <- apply(cverrs, 2, mean)
+cverrs_sd   <- apply(cverrs, 2, sd)
+```
+
+## 5.
+
+Plot results of 5-fold CV for kNN = 1:70
+```{r}
+
+plot(x=1:70, y=cverrs_mean, 
+     ylim=range(cverrs),
+     xlab="'k' in kNN", ylab="CV Estimate of Test Error")
+segments(x0=1:70, x1=1:70,
+         y0=cverrs_mean-cverrs_sd,
+         y1=cverrs_mean+cverrs_sd)
+best_idx <- which.min(cverrs_mean)
+points(x=best_idx, y=cverrs_mean[best_idx], pch=20)
+abline(h=cverrs_mean[best_idx] + cverrs_sd[best_idx], lty=3)
+```
+
+## 6. 
+This figure gives us the average test error as well as the values one standard error away from the mean for each knn prediction model, varying k, the number of points in our neighborhood, from 1 to 70. We see that k = 15 gives us the lowest test error but we want to apply the parismony principle and select the model that is not as complex, yet still gives us a good estimate of test error. k = 23 is the model I would select since it's mean is one standard error away. Now we have a less complex model and a similar test error.
