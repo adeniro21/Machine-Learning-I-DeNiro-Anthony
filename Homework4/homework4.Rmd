@@ -1,0 +1,99 @@
+---
+title: "Homework 4"
+author: Anthony DeNiro
+date: March 31, 2020
+output: github_document
+---
+
+```{r}
+library(randomForest)
+library(ElemStatLearn)
+library(caret)
+```
+
+```{r}
+data("vowel.train")
+data("vowel.test")
+```
+
+
+```{r}
+head(vowel.train)
+```
+
+# 1. change response variable to a factor
+```{r}
+vowel.train$y <- as.factor(vowel.train$y)
+```
+
+#2. Random Forest Documentation
+```{r}
+#?randomForest()
+```
+
+# 3. Fit model with default parameters
+```{r}
+rf1 <- randomForest(vowel.train[2:11], vowel.train$y)
+
+rf1
+```
+
+# 4. Grid search to fit models with different parameter combinations, using cross validation
+```{r}
+rf_grid <- expand.grid(mtry = c(3,4,5), nodesize = c(1,5,10,20,40,80), oob_error = NA_real_)
+
+set.seed(1985)
+inc_flds  <- createFolds(vowel.train$y, k=5)
+#print(inc_flds)
+#sapply(inc_flds, length)  ## not all the same length
+
+for(i in 1:nrow(rf_grid))
+{
+  cvrf <- function(mtry, nodesize, flds=inc_flds) 
+  {
+    cverr <- rep(NA, length(flds))
+    for(tst_idx in 1:length(flds)) 
+    { ## for each fold
+      
+          ## get training and testing data
+      inc_trn <- vowel.train[-flds[[tst_idx]],]
+      inc_tst <- vowel.train[ flds[[tst_idx]],]
+      
+      
+      ## fit kNN model to training data
+      rf2 <- randomForest(inc_trn[2:11], inc_trn$y, mtry = mtry, nodesize = nodesize)
+      
+      ## compute error
+      cverr[tst_idx] <- mean(rf2$err.rate[,1])
+    }
+    return(cverr)
+  }
+   avg_cv_error <- mean(cvrf(mtry = rf_grid[[i,1]], nodesize = rf_grid[[i,2]]))
+   rf_grid[[i,3]] <- avg_cv_error
+}
+
+# output grid with error rate for each parameter combination
+rf_grid
+```
+
+# 5. Predict with tuned model to determine misclassification rate
+```{r}
+rf3 <- randomForest(vowel.train[2:11], vowel.train$y, mtry = 3, nodesize = 1)
+
+rf_preds <- predict(rf3, newdata = vowel.test[2:11])
+
+classification_count <- 0
+  
+for(i in 1:nrow(vowel.test))
+{
+  if(rf_preds[i] == vowel.test[[i,1]])
+  {
+    classification_count <- classification_count + 1
+  }
+}
+
+# misclassification rate
+1 - (classification_count/nrow(vowel.test))
+
+```
+
